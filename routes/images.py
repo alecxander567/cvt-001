@@ -4,10 +4,16 @@ from supabase import create_client
 import cloudinary
 import cloudinary.uploader
 from utils.cloud_config import configure_cloudinary
-from models.User import UpdateImagePayload, ImageResponse
+from models.User import UpdateImagePayload, ImageResponse, CompareResponse
 from jose import jwt, JWTError
 import os
 from dotenv import load_dotenv
+from utils.image_compare import (
+    load_image_from_url,
+    load_image_from_bytes,
+    extract_features,
+    cosine_similarity,
+)
 
 load_dotenv()
 
@@ -39,6 +45,7 @@ def get_current_user(
 @router.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
+    album_id: str | None = None,
     current_user: dict = Depends(get_current_user),
 ):
     try:
@@ -53,6 +60,7 @@ async def upload_image(
         supabase.table("images").insert(
             {
                 "user_id": int(current_user["user_id"]),
+                "album_id": album_id,
                 "url": result["secure_url"],
                 "public_id": result["public_id"],
                 "name": file.filename or "Untitled",
@@ -136,6 +144,49 @@ async def delete_image(
         cloudinary.uploader.destroy(existing.data[0]["public_id"])
 
         supabase.table("images").delete().eq("id", image_id).execute()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/compare/{image_id}", response_model=CompareResponse)
+async def compare_image(
+    image_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        existing = (
+            supabase.table("images")
+            .select("*")
+            .eq("id", image_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        stored_url = existing.data[0]["url"]
+
+        stored_img = load_image_from_url(stored_url)
+
+        new_image_bytes = await file.read()
+        new_img = load_image_from_bytes(new_image_bytes)
+
+        stored_features = extract_features(stored_img)
+        new_features = extract_features(new_img)
+
+        similarity = cosine_similarity(stored_features, new_features)
+
+        is_match = similarity > 0.75
+
+        return {
+            "similarity": float(similarity),
+            "is_match": is_match,
+        }
 
     except HTTPException:
         raise

@@ -51,3 +51,23 @@ class ImageResponse(BaseModel):
 class UpdateImagePayload(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+class CompareResponse(BaseModel):
+    similarity: float
+    is_match: bool
+
+
+class AlbumCreate(BaseModel):
+    name: str
+
+
+class AlbumResponse(BaseModel):
+    id: str
+    name: str
+    user_id: int
+    created_at: Optional[str] = None
+
+
+class ImageUpload(BaseModel):
+    album_id: Optional[str] = None
