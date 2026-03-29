@@ -149,7 +149,6 @@ async def set_album_images(
         image_ids: list = payload.get("image_ids", [])
         removed_ids: list = payload.get("removed_ids", [])
 
-        # Add images to album
         if image_ids:
             supabase.table("images").update({"album_id": album_id}).in_(
                 "id", image_ids
