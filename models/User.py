@@ -29,7 +29,7 @@ class Image(BaseModel):
     category: Optional[str] = None
     url: str
     public_id: str
-    features: Optional[list[float]] = None  # 🔥 ADD THIS
+    features: Optional[list[float]] = None
     created_at: Optional[str] = None
 
 

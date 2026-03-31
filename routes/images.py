@@ -143,7 +143,6 @@ async def update_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── Delete ────────────────────────────────────────────────────────────────────
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(
     image_id: str,
