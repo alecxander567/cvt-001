@@ -29,6 +29,7 @@ class Image(BaseModel):
     category: Optional[str] = None
     url: str
     public_id: str
+    features: Optional[list[float]] = None  # 🔥 ADD THIS
     created_at: Optional[str] = None
 
 
@@ -53,9 +54,19 @@ class UpdateImagePayload(BaseModel):
     description: Optional[str] = None
 
 
+class LabelScore(BaseModel):
+    label: str
+    score: float
+
+
 class CompareResponse(BaseModel):
     similarity: float
     is_match: bool
+    object_match: bool
+    stored_labels: list[LabelScore]
+    new_labels: list[LabelScore]
+    shared_labels: list[str]
+    verdict: str
 
 
 class AlbumCreate(BaseModel):

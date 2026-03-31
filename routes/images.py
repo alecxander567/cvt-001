@@ -13,14 +13,15 @@ from utils.image_compare import (
     load_image_from_bytes,
     extract_features,
     cosine_similarity,
+    compare_images,
+    clip_object_similarity,
 )
+import numpy as np
 
 load_dotenv()
-
 configure_cloudinary()
 
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 
@@ -51,21 +52,38 @@ async def upload_image(
     try:
         contents = await file.read()
 
+        try:
+            img = load_image_from_bytes(contents)
+            features = extract_features(img)
+            features_list = [float(x) for x in features]
+        except Exception as feat_err:
+            features_list = None
+
         result = cloudinary.uploader.upload(
             contents,
             folder="custom-vision-tagger",
             resource_type="image",
         )
 
-        supabase.table("images").insert(
-            {
-                "user_id": int(current_user["user_id"]),
-                "album_id": album_id,
-                "url": result["secure_url"],
-                "public_id": result["public_id"],
-                "name": file.filename or "Untitled",
-            }
-        ).execute()
+        insert_result = (
+            supabase.table("images")
+            .insert(
+                {
+                    "user_id": int(current_user["user_id"]),
+                    "album_id": album_id,
+                    "url": result["secure_url"],
+                    "public_id": result["public_id"],
+                    "name": file.filename or "Untitled",
+                    "features": features_list,
+                }
+            )
+            .execute()
+        )
+
+        if not insert_result.data:
+            raise HTTPException(
+                status_code=500, detail="Supabase insert returned no data"
+            )
 
         return {
             "url": result["secure_url"],
@@ -79,13 +97,13 @@ async def upload_image(
 
 
 @router.get("/my-images")
-async def get_my_images(
-    current_user: dict = Depends(get_current_user),
-):
+async def get_my_images(current_user: dict = Depends(get_current_user)):
     try:
         result = (
             supabase.table("images")
-            .select("*")
+            .select(
+                "id, user_id, name, description, category, url, public_id, album_id, created_at"
+            )
             .eq("user_id", int(current_user["user_id"]))
             .order("created_at", desc=True)
             .execute()
@@ -104,7 +122,7 @@ async def update_image(
     try:
         existing = (
             supabase.table("images")
-            .select("*")
+            .select("id, user_id")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -125,6 +143,7 @@ async def update_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Delete ────────────────────────────────────────────────────────────────────
 @router.delete("/{image_id}", status_code=204)
 async def delete_image(
     image_id: str,
@@ -133,7 +152,7 @@ async def delete_image(
     try:
         existing = (
             supabase.table("images")
-            .select("*")
+            .select("id, user_id, public_id")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -141,7 +160,14 @@ async def delete_image(
         if not existing.data:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        cloudinary.uploader.destroy(existing.data[0]["public_id"])
+        public_id = existing.data[0]["public_id"]
+
+        destroy_result = cloudinary.uploader.destroy(public_id, resource_type="image")
+
+        if destroy_result.get("result") not in ("ok", "not found"):
+            raise HTTPException(
+                status_code=500, detail=f"Cloudinary delete failed: {destroy_result}"
+            )
 
         supabase.table("images").delete().eq("id", image_id).execute()
 
@@ -151,7 +177,7 @@ async def delete_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/compare/{image_id}", response_model=CompareResponse)
+@router.post("/compare/{image_id}")
 async def compare_image(
     image_id: str,
     file: UploadFile = File(...),
@@ -160,33 +186,51 @@ async def compare_image(
     try:
         existing = (
             supabase.table("images")
-            .select("*")
+            .select("id, user_id, url, features")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
         )
-
         if not existing.data:
             raise HTTPException(status_code=404, detail="Image not found")
 
         stored_url = existing.data[0]["url"]
+        stored_features_raw = existing.data[0].get("features")
 
+        contents = await file.read()
+        new_img = load_image_from_bytes(contents)
+
+        # Fast path: use stored MobileNetV2 features for similarity
+        if stored_features_raw:
+            stored_features = np.array(stored_features_raw, dtype=np.float32)
+            new_features = extract_features(new_img)
+            similarity = cosine_similarity(stored_features, new_features)
+            is_match = similarity >= 0.75
+
+            # CLIP for semantic object matching — no fixed category list
+            stored_img = load_image_from_url(stored_url)
+            clip_score = clip_object_similarity(stored_img, new_img)
+            object_match = clip_score >= 0.85
+
+            if is_match:
+                verdict = "same_object"
+            elif object_match:
+                verdict = "same_category_different_instance"
+            else:
+                verdict = "different"
+
+            return {
+                "similarity": round(float(similarity), 4),
+                "clip_score": round(float(clip_score), 4),
+                "is_match": is_match,
+                "object_match": object_match,
+                "shared_labels": [],
+                "verdict": verdict,
+            }
+
+        # Slow path: no stored features
         stored_img = load_image_from_url(stored_url)
-
-        new_image_bytes = await file.read()
-        new_img = load_image_from_bytes(new_image_bytes)
-
-        stored_features = extract_features(stored_img)
-        new_features = extract_features(new_img)
-
-        similarity = cosine_similarity(stored_features, new_features)
-
-        is_match = similarity > 0.75
-
-        return {
-            "similarity": float(similarity),
-            "is_match": is_match,
-        }
+        return compare_images(stored_img, new_img)
 
     except HTTPException:
         raise
