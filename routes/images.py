@@ -161,7 +161,7 @@ async def get_my_images(current_user: dict = Depends(get_current_user)):
         result = (
             supabase.table("images")
             .select(
-                "id, user_id, name, description, category, url, public_id, album_id, created_at"
+                "id, user_id, name, description, category, category_id, url, public_id, album_id, created_at"
             )
             .eq("user_id", int(current_user["user_id"]))
             .order("created_at", desc=True)

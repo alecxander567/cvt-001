@@ -27,6 +27,7 @@ class Image(BaseModel):
     name: str
     description: Optional[str] = None
     category: Optional[str] = None
+    category_id: Optional[str] = None
     url: str
     public_id: str
     features: Optional[list[float]] = None
@@ -44,6 +45,7 @@ class ImageResponse(BaseModel):
     name: str
     description: Optional[str] = None
     category: Optional[str] = None
+    category_id: Optional[str] = None
     url: str
     public_id: str
     created_at: str
@@ -52,6 +54,7 @@ class ImageResponse(BaseModel):
 class UpdateImagePayload(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    category_id: Optional[str] = None
 
 
 class LabelScore(BaseModel):
@@ -82,3 +85,18 @@ class AlbumResponse(BaseModel):
 
 class ImageUpload(BaseModel):
     album_id: Optional[str] = None
+
+
+class CategoryCreate(BaseModel):
+    name: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str
+
+
+class CategoryResponse(BaseModel):
+    id: str
+    user_id: int
+    name: str
+    created_at: Optional[str] = None
