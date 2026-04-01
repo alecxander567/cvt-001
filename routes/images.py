@@ -96,6 +96,65 @@ async def upload_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/upload-image")
+async def upload_image_from_device(
+    file: UploadFile = File(...),
+    album_id: str | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    try:
+        contents = await file.read()
+
+        # Extract ML features for future comparisons
+        try:
+            img = load_image_from_bytes(contents)
+            features = extract_features(img)
+            features_list = [float(x) for x in features]
+        except Exception:
+            features_list = None
+
+        # Upload to Cloudinary
+        result = cloudinary.uploader.upload(
+            contents,
+            folder="custom-vision-tagger",
+            resource_type="image",
+        )
+
+        # Save to Supabase under the logged-in user
+        insert_result = (
+            supabase.table("images")
+            .insert(
+                {
+                    "user_id": int(current_user["user_id"]),
+                    "album_id": album_id,
+                    "url": result["secure_url"],
+                    "public_id": result["public_id"],
+                    "name": file.filename or "Untitled",
+                    "features": features_list,
+                }
+            )
+            .execute()
+        )
+
+        if not insert_result.data:
+            raise HTTPException(
+                status_code=500, detail="Supabase insert returned no data"
+            )
+
+        return {
+            "url": result["secure_url"],
+            "public_id": result["public_id"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/my-images")
 async def get_my_images(current_user: dict = Depends(get_current_user)):
     try:
@@ -169,6 +228,81 @@ async def delete_image(
             )
 
         supabase.table("images").delete().eq("id", image_id).execute()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# SPECIFIC routes must come BEFORE generic /{param} routes
+# compare-album is placed here so FastAPI doesn't mistake "compare-album"
+# for an image_id and route it into compare/{image_id} instead.
+
+
+@router.post("/compare-album/{album_id}")
+async def compare_album(
+    album_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        result = (
+            supabase.table("images")
+            .select("id, url, features")
+            .eq("album_id", album_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+
+        images = result.data
+
+        if not images:
+            raise HTTPException(status_code=404, detail="No images in album")
+
+        contents = await file.read()
+        query_img = load_image_from_bytes(contents)
+        query_features = extract_features(query_img)
+
+        results = []
+
+        for img in images:
+            stored_url = img["url"]
+            stored_features_raw = img.get("features")
+
+            if stored_features_raw:
+                stored_features = np.array(stored_features_raw, dtype=np.float32)
+                similarity = cosine_similarity(stored_features, query_features)
+            else:
+                stored_img = load_image_from_url(stored_url)
+                stored_features = extract_features(stored_img)
+                similarity = cosine_similarity(stored_features, query_features)
+
+            # --- CLIP semantic comparison ---
+            stored_img = load_image_from_url(stored_url)
+            clip_score = clip_object_similarity(stored_img, query_img)
+
+            # --- Verdict ---
+            if similarity >= 0.75:
+                verdict = "same_object"
+            elif clip_score >= 0.85:
+                verdict = "same_category_different_instance"
+            else:
+                verdict = "different"
+
+            results.append(
+                {
+                    "image_id": img["id"],
+                    "url": stored_url,
+                    "similarity": round(float(similarity), 4),
+                    "clip_score": round(float(clip_score), 4),
+                    "verdict": verdict,
+                }
+            )
+
+        results = sorted(results, key=lambda x: x["similarity"], reverse=True)
+
+        return {"best_match": results[0], "matches": results}
 
     except HTTPException:
         raise
