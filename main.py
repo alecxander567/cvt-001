@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import auth, images, albums, categories
+from routes import auth, images, albums, categories, activity
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +25,7 @@ app.include_router(auth.router, prefix="/auth")
 app.include_router(images.router, prefix="/images")
 app.include_router(albums.router, prefix="/albums")
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
+app.include_router(activity.router)
 
 
 @app.get("/")

@@ -100,3 +100,23 @@ class CategoryResponse(BaseModel):
     user_id: int
     name: str
     created_at: Optional[str] = None
+
+
+class ActivityLog(BaseModel):
+    id: Optional[str] = None
+    user_id: int
+    action: str  # CREATE, UPDATE, DELETE
+    entity: str  # image, album, category
+    entity_id: Optional[str] = None
+    description: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ActivityLogResponse(BaseModel):
+    id: str
+    user_id: int
+    action: str
+    entity: str
+    entity_id: Optional[str]
+    description: Optional[str]
+    created_at: str

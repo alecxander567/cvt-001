@@ -17,6 +17,7 @@ from utils.image_compare import (
     clip_object_similarity,
 )
 import numpy as np
+from utils.activity_logger import log_activity
 
 load_dotenv()
 configure_cloudinary()
@@ -56,7 +57,7 @@ async def upload_image(
             img = load_image_from_bytes(contents)
             features = extract_features(img)
             features_list = [float(x) for x in features]
-        except Exception as feat_err:
+        except Exception:
             features_list = None
 
         result = cloudinary.uploader.upload(
@@ -84,6 +85,17 @@ async def upload_image(
             raise HTTPException(
                 status_code=500, detail="Supabase insert returned no data"
             )
+
+        new_image = insert_result.data[0]
+        image_id = new_image["id"]
+
+        log_activity(
+            user_id=int(current_user["user_id"]),
+            action="CREATE",
+            entity="image",
+            entity_id=image_id,
+            description=f"Uploaded image '{new_image['name']}'",
+        )
 
         return {
             "url": result["secure_url"],
@@ -108,7 +120,6 @@ async def upload_image_from_device(
     try:
         contents = await file.read()
 
-        # Extract ML features for future comparisons
         try:
             img = load_image_from_bytes(contents)
             features = extract_features(img)
@@ -116,14 +127,12 @@ async def upload_image_from_device(
         except Exception:
             features_list = None
 
-        # Upload to Cloudinary
         result = cloudinary.uploader.upload(
             contents,
             folder="custom-vision-tagger",
             resource_type="image",
         )
 
-        # Save to Supabase under the logged-in user
         insert_result = (
             supabase.table("images")
             .insert(
@@ -143,6 +152,17 @@ async def upload_image_from_device(
             raise HTTPException(
                 status_code=500, detail="Supabase insert returned no data"
             )
+
+        new_image = insert_result.data[0]
+        image_id = new_image["id"]
+
+        log_activity(
+            user_id=int(current_user["user_id"]),
+            action="CREATE",
+            entity="image",
+            entity_id=image_id,
+            description=f"Uploaded image '{new_image['name']}'",
+        )
 
         return {
             "url": result["secure_url"],
@@ -181,7 +201,7 @@ async def update_image(
     try:
         existing = (
             supabase.table("images")
-            .select("id, user_id")
+            .select("id, user_id, name")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -194,7 +214,21 @@ async def update_image(
             raise HTTPException(status_code=400, detail="No fields to update")
 
         result = supabase.table("images").update(updates).eq("id", image_id).execute()
-        return result.data[0]
+
+        updated_image = result.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="UPDATE",
+                entity="image",
+                entity_id=image_id,
+                description=f"Updated image '{existing.data[0]['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        return updated_image
 
     except HTTPException:
         raise
@@ -210,7 +244,7 @@ async def delete_image(
     try:
         existing = (
             supabase.table("images")
-            .select("id, user_id, public_id")
+            .select("id, user_id, public_id, name")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -218,8 +252,21 @@ async def delete_image(
         if not existing.data:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        public_id = existing.data[0]["public_id"]
+        image_data = existing.data[0]
+        public_id = image_data["public_id"]
 
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="DELETE",
+                entity="image",
+                entity_id=image_id,
+                description=f"Deleted image '{image_data['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        # Delete from Cloudinary
         destroy_result = cloudinary.uploader.destroy(public_id, resource_type="image")
 
         if destroy_result.get("result") not in ("ok", "not found"):
@@ -227,6 +274,7 @@ async def delete_image(
                 status_code=500, detail=f"Cloudinary delete failed: {destroy_result}"
             )
 
+        # Delete from Supabase
         supabase.table("images").delete().eq("id", image_id).execute()
 
     except HTTPException:

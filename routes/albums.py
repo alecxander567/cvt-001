@@ -6,6 +6,7 @@ import os
 from models.User import AlbumCreate, AlbumResponse, ImageResponse
 from jose import jwt, JWTError
 from typing import List
+from utils.activity_logger import log_activity
 
 load_dotenv()
 
@@ -50,7 +51,20 @@ async def create_album(
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to create album")
 
-        return result.data[0]
+        new_album = result.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="CREATE",
+                entity="album",
+                entity_id=new_album["id"],
+                description=f"Created album '{new_album['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        return new_album
 
     except HTTPException:
         raise
@@ -129,22 +143,18 @@ async def set_album_images(
     payload: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Set images for an album.
-    payload: { "image_ids": ["uuid1", "uuid2", ...], "removed_ids": ["uuid3", ...] }
-    - Assigns album_id to all image_ids
-    - Clears album_id from removed_ids
-    """
     try:
         album = (
             supabase.table("albums")
-            .select("id")
+            .select("id, name")
             .eq("id", album_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
         )
         if not album.data:
             raise HTTPException(status_code=404, detail="Album not found")
+
+        album_name = album.data[0]["name"]
 
         image_ids: list = payload.get("image_ids", [])
         removed_ids: list = payload.get("removed_ids", [])
@@ -159,6 +169,30 @@ async def set_album_images(
                 "id", removed_ids
             ).eq("user_id", int(current_user["user_id"])).execute()
 
+        if image_ids:
+            try:
+                log_activity(
+                    user_id=int(current_user["user_id"]),
+                    action="UPDATE",
+                    entity="album",
+                    entity_id=album_id,
+                    description=f"Added {len(image_ids)} image(s) to album '{album_name}'",
+                )
+            except Exception as e:
+                print("Logging failed:", e)
+
+        if removed_ids:
+            try:
+                log_activity(
+                    user_id=int(current_user["user_id"]),
+                    action="UPDATE",
+                    entity="album",
+                    entity_id=album_id,
+                    description=f"Removed {len(removed_ids)} image(s) from album '{album_name}'",
+                )
+            except Exception as e:
+                print("Logging failed:", e)
+
         return {"updated": len(image_ids), "removed": len(removed_ids)}
 
     except HTTPException:
@@ -170,12 +204,39 @@ async def set_album_images(
 @router.delete("/{album_id}", status_code=204)
 async def delete_album(album_id: str, current_user: dict = Depends(get_current_user)):
     try:
+        existing = (
+            supabase.table("albums")
+            .select("id, name")
+            .eq("id", album_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Album not found")
+
+        album_data = existing.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="DELETE",
+                entity="album",
+                entity_id=album_id,
+                description=f"Deleted album '{album_data['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        # Remove album_id from images
         supabase.table("images").update({"album_id": None}).eq(
             "album_id", album_id
         ).execute()
 
+        # Delete album
         supabase.table("albums").delete().eq("id", album_id).eq(
             "user_id", int(current_user["user_id"])
         ).execute()
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
