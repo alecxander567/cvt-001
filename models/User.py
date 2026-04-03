@@ -31,6 +31,8 @@ class Image(BaseModel):
     url: str
     public_id: str
     features: Optional[list[float]] = None
+    is_archived: Optional[bool] = False
+    archived_at: Optional[str] = None
     created_at: Optional[str] = None
 
 
@@ -105,8 +107,8 @@ class CategoryResponse(BaseModel):
 class ActivityLog(BaseModel):
     id: Optional[str] = None
     user_id: int
-    action: str  # CREATE, UPDATE, DELETE
-    entity: str  # image, album, category
+    action: str
+    entity: str
     entity_id: Optional[str] = None
     description: Optional[str] = None
     created_at: Optional[str] = None

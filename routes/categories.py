@@ -5,6 +5,7 @@ from models.User import CategoryCreate, CategoryResponse, CategoryUpdate
 from jose import jwt, JWTError
 import os
 from dotenv import load_dotenv
+from utils.activity_logger import log_activity
 
 load_dotenv()
 
@@ -63,7 +64,21 @@ async def create_category(
         )
         if not result.data:
             raise HTTPException(status_code=500, detail="Insert returned no data")
-        return result.data[0]
+
+        new_category = result.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="CREATE",
+                entity="category",
+                entity_id=new_category["id"],
+                description=f"Created category '{new_category['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        return new_category
     except HTTPException:
         raise
     except Exception as e:
@@ -83,7 +98,7 @@ async def update_category(
     try:
         existing = (
             supabase.table("categories")
-            .select("id, user_id")
+            .select("id, user_id, name")
             .eq("id", category_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -97,7 +112,21 @@ async def update_category(
             .eq("id", category_id)
             .execute()
         )
-        return result.data[0]
+
+        updated_category = result.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="UPDATE",
+                entity="category",
+                entity_id=category_id,
+                description=f"Renamed category '{existing.data[0]['name']}' to '{updated_category['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        return updated_category
     except HTTPException:
         raise
     except Exception as e:
@@ -116,7 +145,7 @@ async def delete_category(
     try:
         existing = (
             supabase.table("categories")
-            .select("id, user_id")
+            .select("id, user_id, name")
             .eq("id", category_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
@@ -124,7 +153,21 @@ async def delete_category(
         if not existing.data:
             raise HTTPException(status_code=404, detail="Category not found")
 
+        category_name = existing.data[0]["name"]
+
         supabase.table("categories").delete().eq("id", category_id).execute()
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="DELETE",
+                entity="category",
+                entity_id=category_id,
+                description=f"Deleted category '{category_name}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
     except HTTPException:
         raise
     except Exception as e:

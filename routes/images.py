@@ -184,6 +184,7 @@ async def get_my_images(current_user: dict = Depends(get_current_user)):
                 "id, user_id, name, description, category, category_id, url, public_id, album_id, created_at"
             )
             .eq("user_id", int(current_user["user_id"]))
+            .eq("is_archived", False)
             .order("created_at", desc=True)
             .execute()
         )
@@ -192,100 +193,91 @@ async def get_my_images(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.patch("/{image_id}", response_model=ImageResponse)
-async def update_image(
-    image_id: str,
-    payload: UpdateImagePayload,
-    current_user: dict = Depends(get_current_user),
-):
+@router.get("/archived")
+async def get_archived_images(current_user: dict = Depends(get_current_user)):
     try:
-        existing = (
+        result = (
             supabase.table("images")
-            .select("id, user_id, name")
-            .eq("id", image_id)
+            .select("*")
             .eq("user_id", int(current_user["user_id"]))
+            .eq("is_archived", True)
+            .order("archived_at", desc=True)
             .execute()
         )
-        if not existing.data:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        updates = {k: v for k, v in payload.model_dump().items() if v is not None}
-        if not updates:
-            raise HTTPException(status_code=400, detail="No fields to update")
-
-        result = supabase.table("images").update(updates).eq("id", image_id).execute()
-
-        updated_image = result.data[0]
-
-        try:
-            log_activity(
-                user_id=int(current_user["user_id"]),
-                action="UPDATE",
-                entity="image",
-                entity_id=image_id,
-                description=f"Updated image '{existing.data[0]['name']}'",
-            )
-        except Exception as e:
-            print("Logging failed:", e)
-
-        return updated_image
-
-    except HTTPException:
-        raise
+        return result.data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{image_id}", status_code=204)
-async def delete_image(
+@router.patch("/restore/{image_id}")
+async def restore_image(
     image_id: str,
     current_user: dict = Depends(get_current_user),
 ):
     try:
         existing = (
             supabase.table("images")
-            .select("id, user_id, public_id, name")
+            .select("id, name")
             .eq("id", image_id)
             .eq("user_id", int(current_user["user_id"]))
             .execute()
         )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        supabase.table("images").update({"is_archived": False, "archived_at": None}).eq(
+            "id", image_id
+        ).execute()
+
+        log_activity(
+            user_id=int(current_user["user_id"]),
+            action="RESTORE",
+            entity="image",
+            entity_id=image_id,
+            description=f"Restored image '{existing.data[0]['name']}'",
+        )
+
+        return {"message": "Image restored successfully"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/permanent/{image_id}")
+async def permanent_delete_image(
+    image_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        existing = (
+            supabase.table("images")
+            .select("id, public_id, name")
+            .eq("id", image_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+
         if not existing.data:
             raise HTTPException(status_code=404, detail="Image not found")
 
         image_data = existing.data[0]
-        public_id = image_data["public_id"]
 
-        try:
-            log_activity(
-                user_id=int(current_user["user_id"]),
-                action="DELETE",
-                entity="image",
-                entity_id=image_id,
-                description=f"Deleted image '{image_data['name']}'",
-            )
-        except Exception as e:
-            print("Logging failed:", e)
-
-        # Delete from Cloudinary
-        destroy_result = cloudinary.uploader.destroy(public_id, resource_type="image")
-
-        if destroy_result.get("result") not in ("ok", "not found"):
-            raise HTTPException(
-                status_code=500, detail=f"Cloudinary delete failed: {destroy_result}"
-            )
-
-        # Delete from Supabase
+        cloudinary.uploader.destroy(image_data["public_id"], resource_type="image")
         supabase.table("images").delete().eq("id", image_id).execute()
 
-    except HTTPException:
-        raise
+        log_activity(
+            user_id=int(current_user["user_id"]),
+            action="PERMANENT_DELETE",
+            entity="image",
+            entity_id=image_id,
+            description=f"Permanently deleted image '{image_data['name']}'",
+        )
+
+        return {"message": "Image permanently deleted"}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# SPECIFIC routes must come BEFORE generic /{param} routes
-# compare-album is placed here so FastAPI doesn't mistake "compare-album"
-# for an image_id and route it into compare/{image_id} instead.
 
 
 @router.post("/compare-album/{album_id}")
@@ -326,11 +318,9 @@ async def compare_album(
                 stored_features = extract_features(stored_img)
                 similarity = cosine_similarity(stored_features, query_features)
 
-            # --- CLIP semantic comparison ---
             stored_img = load_image_from_url(stored_url)
             clip_score = clip_object_similarity(stored_img, query_img)
 
-            # --- Verdict ---
             if similarity >= 0.75:
                 verdict = "same_object"
             elif clip_score >= 0.85:
@@ -381,14 +371,12 @@ async def compare_image(
         contents = await file.read()
         new_img = load_image_from_bytes(contents)
 
-        # Fast path: use stored MobileNetV2 features for similarity
         if stored_features_raw:
             stored_features = np.array(stored_features_raw, dtype=np.float32)
             new_features = extract_features(new_img)
             similarity = cosine_similarity(stored_features, new_features)
             is_match = similarity >= 0.75
 
-            # CLIP for semantic object matching — no fixed category list
             stored_img = load_image_from_url(stored_url)
             clip_score = clip_object_similarity(stored_img, new_img)
             object_match = clip_score >= 0.85
@@ -409,11 +397,90 @@ async def compare_image(
                 "verdict": verdict,
             }
 
-        # Slow path: no stored features
         stored_img = load_image_from_url(stored_url)
         return compare_images(stored_img, new_img)
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/{image_id}", response_model=ImageResponse)
+async def update_image(
+    image_id: str,
+    payload: UpdateImagePayload,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        existing = (
+            supabase.table("images")
+            .select("id, user_id, name")
+            .eq("id", image_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        result = supabase.table("images").update(updates).eq("id", image_id).execute()
+        updated_image = result.data[0]
+
+        try:
+            log_activity(
+                user_id=int(current_user["user_id"]),
+                action="UPDATE",
+                entity="image",
+                entity_id=image_id,
+                description=f"Updated image '{existing.data[0]['name']}'",
+            )
+        except Exception as e:
+            print("Logging failed:", e)
+
+        return updated_image
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{image_id}", status_code=200)
+async def archive_image(
+    image_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        existing = (
+            supabase.table("images")
+            .select("id, user_id, name")
+            .eq("id", image_id)
+            .eq("user_id", int(current_user["user_id"]))
+            .execute()
+        )
+
+        if not existing.data:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        image_data = existing.data[0]
+
+        supabase.table("images").update(
+            {"is_archived": True, "archived_at": "now()"}
+        ).eq("id", image_id).execute()
+
+        log_activity(
+            user_id=int(current_user["user_id"]),
+            action="ARCHIVE",
+            entity="image",
+            entity_id=image_id,
+            description=f"Archived image '{image_data['name']}'",
+        )
+
+        return {"message": "Image archived successfully"}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
