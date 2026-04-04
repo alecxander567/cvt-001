@@ -18,7 +18,7 @@ _clip_preprocess = None
 def _get_clip():
     global _clip_model, _clip_preprocess
     if _clip_model is None:
-        _clip_model, _clip_preprocess = clip.load("ViT-B/32", device="cpu")
+        _clip_model, _clip_preprocess = clip.load("RN50", device="cpu")
         _clip_model.eval()
     return _clip_model, _clip_preprocess
 
@@ -34,7 +34,7 @@ def load_image_from_bytes(file_bytes: bytes) -> Image.Image:
 
 
 def extract_features(img: Image.Image) -> np.ndarray:
-    """512-dim CLIP embedding, replaces MobileNetV2."""
+    """1024-dim CLIP embedding (RN50)."""
     model, preprocess = _get_clip()
     image_input = preprocess(img).unsqueeze(0)
     with torch.no_grad():
