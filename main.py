@@ -3,16 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes import auth, images, albums, categories, activity, user
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
-from utils.image_compare import _get_clip
+from utils.image_compare import _get_model
 
 load_dotenv()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Warming up CLIP model...")
-    _get_clip()
-    print("CLIP model ready.")
+    print("Warming up model...")
+    _get_model()
+    print("Model ready.")
     yield
 
 
