@@ -9,7 +9,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:5173",
-    "https://cvt-client.vercel.app/",
+    "https://cvt-client-d1v7dtukr-alecxander567s-projects.vercel.app",
 ]
 
 app.add_middleware(
