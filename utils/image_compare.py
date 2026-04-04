@@ -4,23 +4,23 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 import numpy as np
 import torch
-import clip
+import torchvision.models as models
+import torchvision.transforms as transforms
 from PIL import Image
 import requests
 from io import BytesIO
-from functools import lru_cache
 
 # --- Lazy model loading ---
-_clip_model = None
-_clip_preprocess = None
+_model = None
 
 
-def _get_clip():
-    global _clip_model, _clip_preprocess
-    if _clip_model is None:
-        _clip_model, _clip_preprocess = clip.load("RN50", device="cpu")
-        _clip_model.eval()
-    return _clip_model, _clip_preprocess
+def _get_model():
+    global _model
+    if _model is None:
+        _model = models.mobilenet_v2(weights=models.MobileNet_V2_Weights.DEFAULT)
+        _model.classifier = torch.nn.Identity()
+        _model.eval()
+    return _model
 
 
 def load_image_from_url(url: str) -> Image.Image:
@@ -34,11 +34,18 @@ def load_image_from_bytes(file_bytes: bytes) -> Image.Image:
 
 
 def extract_features(img: Image.Image) -> np.ndarray:
-    """1024-dim CLIP embedding (RN50)."""
-    model, preprocess = _get_clip()
-    image_input = preprocess(img).unsqueeze(0)
+    """1280-dim MobileNetV2 embedding."""
+    model = _get_model()
+    transform = transforms.Compose(
+        [
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+    )
+    tensor = transform(img).unsqueeze(0)
     with torch.no_grad():
-        features = model.encode_image(image_input)
+        features = model(tensor)
         features = features / features.norm(dim=-1, keepdim=True)
     return features.squeeze(0).numpy().astype(np.float32)
 
@@ -52,10 +59,6 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
 
 
 def clip_object_similarity(img1: Image.Image, img2: Image.Image) -> float:
-    """
-    Now reuses extract_features instead of duplicating logic.
-    Since features are already L2-normalized, dot product == cosine similarity.
-    """
     feat1 = extract_features(img1)
     feat2 = extract_features(img2)
     return float(np.dot(feat1, feat2))
@@ -70,9 +73,8 @@ def compare_images(
     feat1 = extract_features(img1)
     feat2 = extract_features(img2)
 
-    # With CLIP, one similarity score covers both cases
     similarity = cosine_similarity(feat1, feat2)
-    clip_score = similarity  # same model, no need to compute twice
+    clip_score = similarity
 
     is_match = similarity >= similarity_threshold
     object_match = similarity >= clip_threshold
