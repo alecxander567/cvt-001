@@ -295,9 +295,7 @@ async def compare_album(
             .eq("user_id", int(current_user["user_id"]))
             .execute()
         )
-
         images = result.data
-
         if not images:
             raise HTTPException(status_code=404, detail="No images in album")
 
@@ -306,21 +304,20 @@ async def compare_album(
         query_features = extract_features(query_img)
 
         results = []
-
         for img in images:
-            stored_url = img["url"]
             stored_features_raw = img.get("features")
 
             if stored_features_raw:
                 stored_features = np.array(stored_features_raw, dtype=np.float32)
                 similarity = cosine_similarity(stored_features, query_features)
+                # CLIP score is the same value when using unified CLIP features
+                clip_score = similarity
             else:
-                stored_img = load_image_from_url(stored_url)
+                # Fallback: only download if no cached features
+                stored_img = load_image_from_url(img["url"])
                 stored_features = extract_features(stored_img)
                 similarity = cosine_similarity(stored_features, query_features)
-
-            stored_img = load_image_from_url(stored_url)
-            clip_score = clip_object_similarity(stored_img, query_img)
+                clip_score = similarity
 
             if similarity >= 0.75:
                 verdict = "same_object"
@@ -332,15 +329,14 @@ async def compare_album(
             results.append(
                 {
                     "image_id": img["id"],
-                    "url": stored_url,
+                    "url": img["url"],
                     "similarity": round(float(similarity), 4),
                     "clip_score": round(float(clip_score), 4),
                     "verdict": verdict,
                 }
             )
 
-        results = sorted(results, key=lambda x: x["similarity"], reverse=True)
-
+        results.sort(key=lambda x: x["similarity"], reverse=True)
         return {"best_match": results[0], "matches": results}
 
     except HTTPException:
