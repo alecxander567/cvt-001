@@ -1,5 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from typing import Optional
+import pydantic
 
 
 class User(BaseModel):
@@ -19,6 +21,12 @@ class UserSignUp(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
 
 
 class Image(BaseModel):
@@ -54,9 +62,11 @@ class ImageResponse(BaseModel):
 
 
 class UpdateImagePayload(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    category_id: Optional[str] = None
+    model_config = pydantic.ConfigDict(populate_by_name=True)
+
+    name: Optional[str] = pydantic.Field(default=None)
+    description: Optional[str] = pydantic.Field(default=None)
+    category_id: Optional[str] = pydantic.Field(default=None)
 
 
 class LabelScore(BaseModel):

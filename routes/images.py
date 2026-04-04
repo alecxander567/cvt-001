@@ -18,6 +18,7 @@ from utils.image_compare import (
 )
 import numpy as np
 from utils.activity_logger import log_activity
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 
 load_dotenv()
 configure_cloudinary()
@@ -410,8 +411,11 @@ async def compare_image(
 async def update_image(
     image_id: str,
     payload: UpdateImagePayload,
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ):
+    from fastapi import Request
+
     try:
         existing = (
             supabase.table("images")
@@ -423,9 +427,15 @@ async def update_image(
         if not existing.data:
             raise HTTPException(status_code=404, detail="Image not found")
 
-        updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+        # Use the raw JSON keys so null values are preserved
+        body = await request.json()
+        allowed = {"name", "description", "category_id"}
+        updates = {k: v for k, v in body.items() if k in allowed}
+
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
+
+        print(">>> updates being written:", updates)
 
         result = supabase.table("images").update(updates).eq("id", image_id).execute()
         updated_image = result.data[0]
