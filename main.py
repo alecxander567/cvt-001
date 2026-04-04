@@ -2,10 +2,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import auth, images, albums, categories, activity, user
 from dotenv import load_dotenv
+from contextlib import asynccontextmanager
+from utils.image_compare import _get_clip
 
 load_dotenv()
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Warming up CLIP model...")
+    _get_clip()
+    print("CLIP model ready.")
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 origins = [
     "http://localhost:5173",
@@ -22,7 +33,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routes
 app.include_router(auth.router, prefix="/auth")
 app.include_router(images.router, prefix="/images")
 app.include_router(albums.router, prefix="/albums")
