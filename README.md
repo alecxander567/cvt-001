@@ -11,15 +11,16 @@ Try it here:
 
 ---
 
-## 🚀 Features
+🚀 Features
 
-* 🔐 Authentication system (JWT-based)
-* 🖼️ Image upload and storage (Cloudinary)
-* 📂 Album management (create, delete, organize)
-* 🧠 Image recognition using TensorFlow
-* 🔍 Image-to-image comparison
-* 🗂️ Archive system (soft delete & restore)
-* 📊 Activity tracking
+🔐 Authentication system (JWT-based)
+🖼️ Image upload and storage (Cloudinary)
+📂 Album management (create, delete, organize)
+🧠 Image recognition using TensorFlow
+🔍 Image-to-image comparison
+🆚 Image-to-album comparison 
+🗂️ Archive system (soft delete & restore)
+📊 Activity tracking
 
 ---
 
