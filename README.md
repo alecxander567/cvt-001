@@ -59,7 +59,6 @@ frontend/
   ├── components/
   ├── pages/
   ├── hooks/
-  └── services/
 
 backend/
   ├── routes/
