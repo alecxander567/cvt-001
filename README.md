@@ -41,6 +41,7 @@ Try it here:
 
 * FastAPI (Python)
 * Supabase (Database & Auth)
+* Cloudinary for image storage
 
 ### Machine Learning
 
