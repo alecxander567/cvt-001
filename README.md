@@ -72,7 +72,7 @@ backend/
 
 1. Users upload images through the frontend
 2. Images are stored in Cloudinary
-3. Backend processes images using TensorFlow
+3. Backend processes images using PyTorch
 4. Extracted features are used for comparison
 5. Results are returned and displayed in the UI
 
